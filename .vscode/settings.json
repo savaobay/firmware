@@ -1,0 +1,7 @@
+{
+    "cmake.configureOnOpen": false,
+    "files.associations": {
+        "stdint.h": "c",
+        "termios.h": "c"
+    }
+}

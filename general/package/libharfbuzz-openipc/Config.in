@@ -1,0 +1,3 @@
+config BR2_PACKAGE_LIBHARFBUZZ_OPENIPC
+	bool "libharfbuzz-openipc"
+	depends on BR2_PACKAGE_FFMPEG_OPENIPC
