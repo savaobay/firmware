@@ -1,0 +1,6 @@
+[submodule "osd"]
+	path = osd
+	url = https://github.com/savaobay/osd
+[submodule "divinus"]
+	path = divinus
+	url = https://github.com/savaobay/divinus
