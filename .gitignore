@@ -1,4 +1,6 @@
 buildroot-*/
+buildroot_dl/*
 output/
 buildroot-*
 .DS_Store
+*/venv

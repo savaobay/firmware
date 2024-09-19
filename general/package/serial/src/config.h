@@ -1,5 +1,3 @@
-#pragma once
-
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -8,10 +6,12 @@
 
 #include "tools.h"
 
-#define MAX_SECTIONS 2
+#define MAX_SECTIONS 3
+#define REG_SECTION "^([[:space:]]*\\[(\\w+)\\][[:space:]]|(\\w+):)"
+#define REG_PARAM "^[[:space:]]*%s[[:space:]]*[=:][[:space:]]*(.[^[:space:];#]*)"
+
 struct IniConfig
 {
-    char path[256];
     char *str;
     struct Section
     {
@@ -30,10 +30,11 @@ enum ConfigError
     CONFIG_ENUM_INCORRECT_STRING,
     CONFIG_REGEX_ERROR,
     CONFIG_CANT_OPEN_PROC_CMDLINE,
-    CONFIG_CANT_READ_PROC_CMDLINE,
-    CONFIG_
+    CONFIG_SENSOR_ISNOT_SUPPORT,
+    CONFIG_SENSOR_NOT_FOUND,
 };
 
+bool open_config(struct IniConfig *ini, FILE **file);
 enum ConfigError find_sections(struct IniConfig *ini);
 enum ConfigError section_pos(struct IniConfig *ini, const char *section, int *start_pos, int *end_pos);
 enum ConfigError parse_param_value(struct IniConfig *ini, const char *section, const char *param_name,
@@ -50,4 +51,3 @@ enum ConfigError parse_uint64(struct IniConfig *ini, const char *section, const 
                               const uint64_t max, uint64_t *int_value);
 enum ConfigError parse_uint32(struct IniConfig *ini, const char *section, const char *param_name,
                               const unsigned int min, const unsigned int max, unsigned int *value);
-enum ConfigError read_sensor_from_proc_cmdline(char *sensor_type);

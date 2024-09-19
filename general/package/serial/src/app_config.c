@@ -1,146 +1,93 @@
 #include "app_config.h"
-
-#include <limits.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+const char *appconf_paths[] = {"./serial.yaml", "/etc/serial.yaml"};
 
 struct AppConfig app_config;
 
-// Function to update or add a key-value pair in a specific section of an ini
-// file
-enum ConfigError write_config(const char *path, const char *section, const char *key, const char *value)
+static inline void *open_app_config(FILE **file, const char *flags)
 {
-    FILE *file = fopen(path, "r+");
-    if (!file)
-    {
-        perror("write_config: Unable to open config file for reading");
-        return -1;
-    }
+    const char **path = appconf_paths;
+    *file = NULL;
 
-    // Read the entire file content into memory
-    fseek(file, 0, SEEK_END);
-    size_t length = (size_t)ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    char *content = malloc(length + 1);
-    if (!content)
+    while (*path)
     {
-        fclose(file);
-        return -1;
-    }
-    fread(content, 1, length, file);
-    content[length] = '\0';
-    fclose(file);
-
-    // Search for the section
-    char *section_start = strstr(content, section);
-    if (!section_start)
-    {
-        // If the section is not found, append it to the file
-        section_start = content + length;
-        sprintf(section_start, "\n[%s]\n", section);
-    }
-
-    // Search for the key in the section
-    char *key_start = strstr(section_start, key);
-    if (!key_start)
-    {
-        // If the key is not found, append it to the section
-        key_start = section_start + strlen(section_start);
-        sprintf(key_start, "%s=%s\n", key, value);
-    }
-    else
-    {
-        // If the key is found, replace its value
-        char *line_end = strchr(key_start, '\n');
-        if (!line_end)
-            line_end = key_start + strlen(key_start);
-        char *value_start = strchr(key_start, '=');
-        if (value_start && value_start < line_end)
+        if (access(*path++, F_OK))
+            continue;
+        if (*flags == 'w')
         {
-            value_start++;
-            while (*value_start == ' ')
-                value_start++; // Skip spaces
-            strcpy(value_start, value);
-            strcpy(value_start + strlen(value), line_end);
+            char bkPath[32];
+            sprintf(bkPath, "%s.bak", *(path - 1));
+            remove(bkPath);
+            rename(*(path - 1), bkPath);
         }
+        *file = fopen(*(path - 1), flags);
+        break;
     }
-
-    // Write the updated content back to the file
-    file = fopen(path, "w");
-    if (!file)
-    {
-        free(content);
-        perror("write_config: Unable to open config file for writing");
-        return CONFIG_ERR_WRITE;
-    }
-    fwrite(content, 1, strlen(content), file);
-    fclose(file);
-
-    free(content);
-    return CONFIG_OK;
 }
 
-enum ConfigError parse_app_config(const char *path)
+void restore_app_config(void)
+{
+    const char **path = appconf_paths;
+
+    while (*path)
+    {
+        char bkPath[32];
+        sprintf(bkPath, "%s.bak", *path);
+        if (!access(bkPath, F_OK))
+        {
+            remove(*path);
+            rename(bkPath, *path);
+        }
+        path++;
+    }
+}
+
+int save_app_config(void)
+{
+    FILE *file;
+
+    open_app_config(&file, "w");
+    if (!file)
+        fprintf(stderr, "Can't open config file for writing\n");
+
+    fprintf(file, "serial:\n");
+    fprintf(file, "  port: %s\n", app_config.port);
+    fprintf(file, "  baudrate: %d\n", app_config.baudrate);
+    fprintf(file, "  package_size: %d\n", app_config.package_size);
+
+    fclose(file);
+    return EXIT_SUCCESS;
+}
+
+enum ConfigError parse_app_config(void)
 {
     memset(&app_config, 0, sizeof(struct AppConfig));
 
     app_config.port[0] = 0;
     app_config.baudrate = 115200;
+    app_config.package_size = 1024;
 
     struct IniConfig ini;
     memset(&ini, 0, sizeof(struct IniConfig));
 
-    // load config file to string
-    ini.str = NULL;
+    FILE *file;
+    open_app_config(&file, "r");
+    if (!open_config(&ini, &file))
     {
-        char config_path[50];
-        FILE *file = fopen("./serial.ini", "rb");
-        if (!file)
-        {
-            file = fopen("/etc/serial.ini", "rb");
-            if (!file)
-            {
-                printf("Can't find config serial.ini in:\n"
-                       "    ./serial.ini\n    /etc/serial.ini\n");
-                return -1;
-            }
-        }
-
-        fseek(file, 0, SEEK_END);
-        size_t length = (size_t)ftell(file);
-        fseek(file, 0, SEEK_SET);
-
-        ini.str = malloc(length + 1);
-        if (!ini.str)
-        {
-            printf("Can't allocate buf in parse_app_config\n");
-            fclose(file);
-            return -1;
-        }
-        size_t n = fread(ini.str, 1, length, file);
-        if (n != length)
-        {
-            printf("Can't read all file %s\n", path);
-            fclose(file);
-            free(ini.str);
-            return -1;
-        }
-        fclose(file);
-        ini.str[length] = 0;
+        // fprintf(stderr, "Can't find config divinus.yaml in: divinus.yaml, /etc/divinus.yaml\n");
+        return -1;
     }
 
     enum ConfigError err;
     find_sections(&ini);
-
     err = parse_param_value(&ini, "serial", "port", app_config.port);
     if (err != CONFIG_OK)
         goto RET_ERR;
-    err = parse_int(&ini, "serial", "baudrate", 0, 115200, &app_config.baudrate);
+    err = parse_int(&ini, "serial", "baudrate", 9600, 115200, &app_config.baudrate);
     if (err != CONFIG_OK)
         goto RET_ERR;
-
+    err = parse_int(&ini, "serial", "package_size", 512, 2048, &app_config.package_size);
+    if (err != CONFIG_OK)
+        goto RET_ERR;
     free(ini.str);
     return CONFIG_OK;
 RET_ERR:

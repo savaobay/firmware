@@ -7,6 +7,7 @@
 #   all-features: false
 #   with-sources: false
 #   generate-hashes: false
+#   universal: false
 
 -e file:.
 numpy==1.26.4
@@ -14,4 +15,6 @@ numpy==1.26.4
 pillow==10.3.0
     # via app
 pyserial==3.5
+    # via app
+ruff==0.6.4
     # via app
