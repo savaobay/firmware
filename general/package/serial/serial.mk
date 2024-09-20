@@ -16,6 +16,10 @@ define SERIAL_BUILD_CMDS
 endef
 
 define SERIAL_INSTALL_TARGET_CMDS
+	$(INSTALL) -m 755 -d $(TARGET_DIR)/etc
+	$(INSTALL) -m 644 -t $(TARGET_DIR)/etc $(@D)/serial.yaml
+
+	$(INSTALL) -m 755 -d $(TARGET_DIR)/usr/bin
 	$(INSTALL) -m 0755 -t $(TARGET_DIR)/usr/bin $(@D)/serial
 endef
 
