@@ -1,6 +1,7 @@
 config BR2_PACKAGE_SERIAL
 	bool "serial"
 	select BR2_PACKAGE_LIBCURL_OPENIPC
+	select BR2_PACKAGE_MBEDTLS_OPENIPC
 
 	help
 	  read/write serial.

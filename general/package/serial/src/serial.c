@@ -1,17 +1,134 @@
 #include "app_config.h"
 #include "data_define.h"
 #include "utils.h"
+#include "watchdog.h"
+#include <errno.h>
 #include <fcntl.h>
+#include <mbedtls/sha256.h>
+#include <pthread.h>
+#include <signal.h>
+#include <sys/mount.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+
 #define IMAGE_PATH "/mnt/mmcblk0p1/2024-05-23/image/00/00-02.jpg"
 #define SD_CARD_PATH "/mnt/mmcblk0p1"
+#define APP_PATH "/usr/bin/serial"
+#define TEMP_UPGRADE_PATH "/tmp/serial"
+#define UPGRADE_FILE_PATH "/mnt/mmcblk0p1/serial"
 
+volatile sig_atomic_t keep_running = 1;
+char grace_ful = 0;
 static int uart_out_fd;
+pthread_t serialPid = 0;
 static int write_data_frame(int fd, struct DataFrame *data_frame);
+#define BUF_SIZE 32768 // Buffer size for reading the file
 
+// Function to calculate the SHA-256 hash of a file
+void sha256_file(const char *filename, unsigned char *hash)
+{
+    FILE *file = fopen(filename, "rb");
+    if (!file)
+    {
+        perror("File opening failed");
+        return;
+    }
+
+    mbedtls_sha256_context sha256_ctx;
+    mbedtls_sha256_init(&sha256_ctx);
+    mbedtls_sha256_starts_ret(&sha256_ctx, 0); // 0 means not in "SHA-224" mode (using SHA-256 mode)
+
+    unsigned char buffer[BUF_SIZE];
+    size_t bytesRead = 0;
+
+    while ((bytesRead = fread(buffer, 1, BUF_SIZE, file)) > 0)
+    {
+        mbedtls_sha256_update_ret(&sha256_ctx, buffer, bytesRead);
+    }
+
+    mbedtls_sha256_finish_ret(&sha256_ctx, hash);
+
+    fclose(file);
+    mbedtls_sha256_free(&sha256_ctx);
+}
+
+int mount_sdcard()
+{
+    // check if sd card is mounted
+    struct stat st;
+    if (stat(SD_CARD_PATH, &st) == 0)
+    {
+        fprintf(stderr, "SD card is already mounted\n");
+        return 0;
+    }
+    if (mount("/dev/mmcblk0p1", SD_CARD_PATH, "vfat", 0, NULL) != 0)
+    {
+        perror("Failed to mount SD card");
+        return -1;
+    }
+    return 0;
+}
+
+int validate_upgrade_file(const char *file_path)
+{
+    struct stat st;
+    if (stat(file_path, &st) != 0 || st.st_size == 0)
+    {
+        fprintf(stderr, "Invalid upgrade file\n");
+        return -1;
+    }
+    unsigned char old[32]; // 32 bytes for SHA-256
+    unsigned char new[32]; // 32 bytes for SHA-256
+
+    sha256_file(APP_PATH, old);
+    sha256_file(UPGRADE_FILE_PATH, new);
+    if (memcmp(old, new, 32) == 0)
+    {
+        fprintf(stderr, "Upgrade file is the same as the current application\n");
+        return -1;
+    }
+    return 0;
+}
+
+int copy_upgrade_file(const char *src, const char *dst)
+{
+    int result = system("mv /mnt/mmcblk0p1/serial /usr/bin/serial");
+    if (result != 0)
+    {
+        perror("Failed to copy upgrade file");
+        return -1;
+    }
+}
+
+void restart_application()
+{
+    printf("Restarting application\n");
+    execl(APP_PATH, APP_PATH, (char *)NULL);
+    perror("Failed to restart application");
+}
+
+void upgrade_application_from_sdcard()
+{
+    if (mount_sdcard() != 0)
+    {
+        return;
+    }
+
+    if (validate_upgrade_file(UPGRADE_FILE_PATH) != 0)
+    {
+        return;
+    }
+
+    if (copy_upgrade_file(UPGRADE_FILE_PATH, APP_PATH) != 0)
+    {
+        return;
+    }
+
+    restart_application();
+}
 // Function to configure the serial port
 void configure_serial_port(int fd, int baud_rate)
 {
@@ -23,18 +140,6 @@ void configure_serial_port(int fd, int baud_rate)
     // Set baud rates
     cfsetispeed(&options, baud_rate);
     cfsetospeed(&options, baud_rate);
-    /*
-        // 8N1 mode
-        options.c_cflag &= ~PARENB; // No parity
-        options.c_cflag &= ~CSTOPB; // 1 stop bit
-        options.c_cflag &= ~CSIZE;
-        options.c_cflag |= CS8; // 8 data bits
-        options.c_cflag &= ~CRTSCTS;
-        // Enable receiver and set local mode
-        options.c_cflag |= (CLOCAL | CREAD);
-
-        // Disable echo and canonical mode (raw mode)
-        options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG); */
 
     options.c_cflag &= ~CSIZE;  // Mask the character size bits
     options.c_cflag |= CS8;     // 8 bit data
@@ -447,23 +552,14 @@ void free_command(struct CommandFrame *cmd)
     }
 }
 
-int main()
+void *serial_thread(void)
 {
-    if (parse_app_config() != CONFIG_OK)
-    {
-        fprintf(stderr, "Can't load app config 'serial.yaml'\n");
-        return EXIT_FAILURE;
-    }
-    printf("app config port: %s baudrate: %d package_size: %d\n", app_config.port, app_config.baudrate,
-           app_config.package_size);
-
     // Open the output serial port
     uart_out_fd = open(app_config.port, O_RDWR | O_NOCTTY | O_NDELAY | O_SYNC);
 
     if (uart_out_fd == -1)
     {
         perror("Unable to open UART_OUT");
-        return ERROR;
     }
     int baud_rate = app_config.baudrate;
     switch (baud_rate)
@@ -496,10 +592,7 @@ int main()
 
     // Ensure the file descriptors are blocking
     fcntl(uart_out_fd, F_SETFL, 0);
-
-    toggleLed();
-
-    while (true)
+    while (keep_running)
     {
         struct AckFrame ack_frame;
         char buffer[256];
@@ -511,7 +604,6 @@ int main()
         {
             perror("Read error");
             close(uart_out_fd);
-            return ERROR;
         }
         else if (num_bytes == 0)
         {
@@ -533,10 +625,91 @@ int main()
         }
         flush_uart(uart_out_fd);
     }
-
     flush_uart(uart_out_fd);
-
     close(uart_out_fd);
+}
 
-    return SUCCESS;
+int start_serial_handler()
+{
+    pthread_attr_t thread_attr;
+    pthread_attr_init(&thread_attr);
+    size_t stacksize;
+    pthread_attr_getstacksize(&thread_attr, &stacksize);
+    size_t new_stacksize = 320 * 1024;
+    if (pthread_attr_setstacksize(&thread_attr, new_stacksize))
+    {
+        printf("[region] Can't set stack size %zu\n", new_stacksize);
+    }
+    pthread_create(&serialPid, &thread_attr, (void *(*)(void *))serial_thread, NULL);
+    if (pthread_attr_setstacksize(&thread_attr, stacksize))
+    {
+        printf("[region] Error:  Can't set stack size %zu\n", stacksize);
+    }
+    pthread_attr_destroy(&thread_attr);
+}
+
+void stop_region_handler()
+{
+
+    pthread_join(serialPid, NULL);
+}
+
+void handle_error(int signo)
+{
+    write(STDERR_FILENO, "Error occurred! Quitting...\n", 28);
+    keep_running = 0;
+    exit(EXIT_FAILURE);
+}
+
+void handle_exit(int signo)
+{
+    write(STDERR_FILENO, "Graceful shutdown...\n", 21);
+    keep_running = 0;
+    grace_ful = 1;
+}
+
+int main(int argc, char *argv[])
+{
+    printf("running main\n");
+    upgrade_application_from_sdcard();
+    {
+        char signal_error[] = {SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV};
+        char signal_exit[] = {SIGINT, SIGQUIT, SIGTERM};
+        char signal_null[] = {EPIPE, SIGPIPE};
+
+        for (char *s = signal_error; s < (&signal_error)[1]; s++)
+            signal(*s, handle_error);
+        for (char *s = signal_exit; s < (&signal_exit)[1]; s++)
+            signal(*s, handle_exit);
+        for (char *s = signal_null; s < (&signal_null)[1]; s++)
+            signal(*s, NULL);
+    }
+
+    if (parse_app_config() != CONFIG_OK)
+    {
+        fprintf(stderr, "Can't load app config 'serial.yaml'\n");
+        return EXIT_FAILURE;
+    }
+    printf("app config port: %s baudrate: %d package_size: %d\n", app_config.port, app_config.baudrate,
+           app_config.package_size);
+
+    toggleLed();
+
+    start_serial_handler();
+
+    while (keep_running)
+    {
+        watchdog_reset();
+        sleep(1);
+    }
+
+    stop_region_handler();
+
+    if (app_config.watchdog)
+        watchdog_stop();
+
+    if (!grace_ful)
+        restore_app_config();
+
+    return grace_ful ? EXIT_SUCCESS : EXIT_FAILURE;
 }

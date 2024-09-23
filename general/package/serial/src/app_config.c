@@ -53,6 +53,7 @@ int save_app_config(void)
     fprintf(file, "  port: %s\n", app_config.port);
     fprintf(file, "  baudrate: %d\n", app_config.baudrate);
     fprintf(file, "  package_size: %d\n", app_config.package_size);
+    fprintf(file, "  watchdog: %d\n", app_config.watchdog);
 
     fclose(file);
     return EXIT_SUCCESS;
@@ -65,6 +66,7 @@ enum ConfigError parse_app_config(void)
     app_config.port[0] = 0;
     app_config.baudrate = 115200;
     app_config.package_size = 1024;
+    app_config.watchdog = 0;
 
     struct IniConfig ini;
     memset(&ini, 0, sizeof(struct IniConfig));
@@ -86,6 +88,9 @@ enum ConfigError parse_app_config(void)
     if (err != CONFIG_OK)
         goto RET_ERR;
     err = parse_int(&ini, "serial", "package_size", 512, 2048, &app_config.package_size);
+    if (err != CONFIG_OK)
+        goto RET_ERR;
+    err = parse_int(&ini, "serial", "watchdog", 0, INT_MAX, &app_config.watchdog);
     if (err != CONFIG_OK)
         goto RET_ERR;
     free(ini.str);

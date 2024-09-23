@@ -9,10 +9,11 @@ SERIAL_SITE = $(SERIAL_PKGDIR)/src
 
 SERIAL_LICENSE = MIT
 SERIAL_LICENSE_FILES = LICENSE
-SERIAL_DEPENDENCIES += libcurl-openipc
+SERIAL_DEPENDENCIES += libcurl-openipc mbedtls-openipc
 
 define SERIAL_BUILD_CMDS
-	$(TARGET_CC) $(@D)/* -lcurl -o $(@D)/serial -s
+	$(TARGET_CC) $(@D)/* -lcurl -lmbedtls -lmbedcrypto -o $(@D)/serial -s
+	cp $(SERIAL_PKGDIR)/serial.yaml $(@D)/
 endef
 
 define SERIAL_INSTALL_TARGET_CMDS

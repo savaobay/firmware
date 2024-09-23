@@ -10,6 +10,7 @@ struct AppConfig
     char port[128];
     int baudrate;
     int package_size;
+    unsigned int watchdog;
 };
 
 extern struct AppConfig app_config;
