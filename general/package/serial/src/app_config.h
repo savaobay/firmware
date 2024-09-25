@@ -1,3 +1,5 @@
+#ifndef APP_CONFIG_H_
+#define APP_CONFIG_H_
 #include "config.h"
 #include <limits.h>
 #include <stdio.h>
@@ -18,3 +20,4 @@ extern struct AppConfig app_config;
 enum ConfigError parse_app_config(void);
 void restore_app_config(void);
 int save_app_config(void);
+#endif

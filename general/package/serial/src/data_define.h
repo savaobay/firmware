@@ -24,9 +24,10 @@ enum Mark
 
 enum PackageSize
 {
-    SIZE_512 = 0x00,
-    SIZE_1024 = 0x01,
-    SIZE_2048 = 0x02,
+    SIZE_256 = 0x00,
+    SIZE_512 = 0x01,
+    SIZE_1024 = 0x02,
+    SIZE_2048 = 0x03,
 };
 
 enum CommandSpecifier
@@ -36,7 +37,7 @@ enum CommandSpecifier
     GET_SPEC_PACKAGE = 0x45,
     SEND_SPEC_DATA_PACKAGE = 0x46,
     BAUD_RATE = 0x49,
-    OSD = 0x4F,
+    MOSD = 0x4F,
     RTC = 0x54,
     NONE = 0x63
 };
@@ -48,7 +49,7 @@ enum BaudRate
     BAUD_38400 = 0x32,
     BAUD_57600 = 0x33,
     BAUD_115200 = 0x34,
-    DEFAULT_BAUD = 0x00
+    DEFAULT_BAUD = 0x34
 };
 
 struct OsdContent

@@ -1,134 +1,23 @@
+#include "serial.h"
 #include "app_config.h"
 #include "data_define.h"
+#include "region.h"
 #include "utils.h"
-#include "watchdog.h"
-#include <errno.h>
 #include <fcntl.h>
-#include <mbedtls/sha256.h>
 #include <pthread.h>
-#include <signal.h>
-#include <sys/mount.h>
-#include <sys/stat.h>
+#include <stdio.h>
+#include <string.h>
 #include <sys/time.h>
+#include <sys/types.h>
 #include <termios.h>
-#include <time.h>
 #include <unistd.h>
-
-#define IMAGE_PATH "/mnt/mmcblk0p1/2024-05-23/image/00/00-02.jpg"
-#define SD_CARD_PATH "/mnt/mmcblk0p1"
-#define APP_PATH "/usr/bin/serial"
-#define TEMP_UPGRADE_PATH "/tmp/serial"
-#define UPGRADE_FILE_PATH "/mnt/mmcblk0p1/serial"
-
-volatile sig_atomic_t keep_running = 1;
-char grace_ful = 0;
-static int uart_out_fd;
 pthread_t serialPid = 0;
+static int uart_out_fd;
+static char path[PATH_MAX];
+static bool need_restart = false;
+
 static int write_data_frame(int fd, struct DataFrame *data_frame);
-#define BUF_SIZE 32768 // Buffer size for reading the file
 
-// Function to calculate the SHA-256 hash of a file
-void sha256_file(const char *filename, unsigned char *hash)
-{
-    FILE *file = fopen(filename, "rb");
-    if (!file)
-    {
-        perror("File opening failed");
-        return;
-    }
-
-    mbedtls_sha256_context sha256_ctx;
-    mbedtls_sha256_init(&sha256_ctx);
-    mbedtls_sha256_starts_ret(&sha256_ctx, 0); // 0 means not in "SHA-224" mode (using SHA-256 mode)
-
-    unsigned char buffer[BUF_SIZE];
-    size_t bytesRead = 0;
-
-    while ((bytesRead = fread(buffer, 1, BUF_SIZE, file)) > 0)
-    {
-        mbedtls_sha256_update_ret(&sha256_ctx, buffer, bytesRead);
-    }
-
-    mbedtls_sha256_finish_ret(&sha256_ctx, hash);
-
-    fclose(file);
-    mbedtls_sha256_free(&sha256_ctx);
-}
-
-int mount_sdcard()
-{
-    // check if sd card is mounted
-    struct stat st;
-    if (stat(SD_CARD_PATH, &st) == 0)
-    {
-        fprintf(stderr, "SD card is already mounted\n");
-        return 0;
-    }
-    if (mount("/dev/mmcblk0p1", SD_CARD_PATH, "vfat", 0, NULL) != 0)
-    {
-        perror("Failed to mount SD card");
-        return -1;
-    }
-    return 0;
-}
-
-int validate_upgrade_file(const char *file_path)
-{
-    struct stat st;
-    if (stat(file_path, &st) != 0 || st.st_size == 0)
-    {
-        fprintf(stderr, "Invalid upgrade file\n");
-        return -1;
-    }
-    unsigned char old[32]; // 32 bytes for SHA-256
-    unsigned char new[32]; // 32 bytes for SHA-256
-
-    sha256_file(APP_PATH, old);
-    sha256_file(UPGRADE_FILE_PATH, new);
-    if (memcmp(old, new, 32) == 0)
-    {
-        fprintf(stderr, "Upgrade file is the same as the current application\n");
-        return -1;
-    }
-    return 0;
-}
-
-int copy_upgrade_file(const char *src, const char *dst)
-{
-    int result = system("mv /mnt/mmcblk0p1/serial /usr/bin/serial");
-    if (result != 0)
-    {
-        perror("Failed to copy upgrade file");
-        return -1;
-    }
-}
-
-void restart_application()
-{
-    printf("Restarting application\n");
-    execl(APP_PATH, APP_PATH, (char *)NULL);
-    perror("Failed to restart application");
-}
-
-void upgrade_application_from_sdcard()
-{
-    if (mount_sdcard() != 0)
-    {
-        return;
-    }
-
-    if (validate_upgrade_file(UPGRADE_FILE_PATH) != 0)
-    {
-        return;
-    }
-
-    if (copy_upgrade_file(UPGRADE_FILE_PATH, APP_PATH) != 0)
-    {
-        return;
-    }
-
-    restart_application();
-}
 // Function to configure the serial port
 void configure_serial_port(int fd, int baud_rate)
 {
@@ -279,7 +168,6 @@ void parse_command(const char *buffer, size_t buffer_length, struct AckFrame *ac
                tm_info.tm_min);
         printf("Requested time: %s\n", asctime(&tm_info));
 
-        char path[PATH_MAX];
         memset(path, 0, PATH_MAX);
         if (findNearestFile(&tm_info, path))
         {
@@ -291,6 +179,9 @@ void parse_command(const char *buffer, size_t buffer_length, struct AckFrame *ac
             int package_size = SIZE_1024;
             switch (cmd.command_content[5])
             {
+            case SIZE_256:
+                package_size = 256;
+                break;
             case SIZE_512:
                 package_size = 512;
                 break;
@@ -348,16 +239,19 @@ void parse_command(const char *buffer, size_t buffer_length, struct AckFrame *ac
         data.id[0] = cmd.command_content[0];
         data.id[1] = cmd.command_content[1];
         data.id[2] = cmd.command_content[2]; // Index package
-        data.data = readBytesFromFile(path, (package_no - 1) * UART_BUFFER_SIZE);
-        memset(path, 0, PATH_MAX);
+        data.data = readBytesFromFile(path, app_config.package_size, (package_no - 1) * app_config.package_size);
+        // memset(path, 0, PATH_MAX);
         if (data.data == NULL)
         {
-            // ack_frame->command_specifier = NONE;
+            ack_frame->command_specifier = NONE;
             free(data.data);
             break;
         }
         switch (app_config.package_size)
         {
+        case 256:
+            data.size = SIZE_256;
+            break;
         case 512:
             data.size = SIZE_512;
             break;
@@ -388,17 +282,47 @@ void parse_command(const char *buffer, size_t buffer_length, struct AckFrame *ac
 
     case BAUD_RATE:
         printf("Baud rate command\n");
+        ack_frame->len = ACK_4;
         if (buffer_length != 7)
         {
-            ack_frame->len = ACK_0;
             ack_frame->command_specifier = NONE;
             return;
         }
-        ack_frame->len = ACK_4;
         int baud_rate = cmd.command_content[0];
+        switch (baud_rate)
+        {
+        case BAUD_9600:
+            baud_rate = 9600;
+            break;
+        case BAUD_19200:
+            baud_rate = 19200;
+            break;
+        case BAUD_38400:
+            baud_rate = 38400;
+            break;
+        case BAUD_57600:
+            baud_rate = 57600;
+            break;
+        case BAUD_115200:
+            baud_rate = 115200;
+            break;
+        default:
+            ack_frame->command_specifier = NONE;
+            return;
+        }
+        if (app_config.baudrate != baud_rate)
+        {
+            app_config.baudrate = baud_rate;
+            if (save_app_config() != EXIT_SUCCESS)
+            {
+                ack_frame->command_specifier = NONE;
+                return;
+            }
+            need_restart = true;
+        }
         break;
 
-    case OSD:
+    case MOSD:
         printf("OSD command\n");
         if (buffer_length < 8)
         {
@@ -416,7 +340,16 @@ void parse_command(const char *buffer, size_t buffer_length, struct AckFrame *ac
         printf("OSD position: %c\n", osd.position);
         printf("OSD text length: %d\n", osd.text_length);
         printf("OSD text: %s\n", osd.text);
-        sendGetRequest(osd.text);
+        // sendGetRequest(osd.text);
+        // set osd text and update
+        char s[DATA_SIZE];
+        time_t t = time(NULL);
+        struct tm *tm = localtime(&t);
+        strftime(s, sizeof(s), timefmt, tm);
+        strcat(s, osd.text);
+        strcpy(osds[0].text, s);
+        osds[0].updt = 1;
+
         free(osd.text);
         break;
 
@@ -512,9 +445,32 @@ void serialize_data_frame(struct DataFrame *data_frame, char *buffer, int *buffe
 
     // memcpy(&buffer[index], data_frame->data.data, data_frame->data.size);
     // index += data_frame->data.size;
+    switch (data_frame->data.size)
+    {
+    case SIZE_256:
+        memcpy(&buffer[index], data_frame->data.data, 256);
+        index += 256;
+        break;
+    case SIZE_512:
+        memcpy(&buffer[index], data_frame->data.data, 512);
+        index += 512;
+        break;
+    case SIZE_1024:
+        memcpy(&buffer[index], data_frame->data.data, 1024);
+        index += 1024;
+        break;
+    case SIZE_2048:
+        memcpy(&buffer[index], data_frame->data.data, 2048);
+        index += 2048;
+        break;
+    default:
+        memcpy(&buffer[index], data_frame->data.data, 1024);
+        index += 1024;
+        break;
+    }
 
-    memcpy(&buffer[index], data_frame->data.data, UART_BUFFER_SIZE);
-    index += UART_BUFFER_SIZE;
+    // memcpy(&buffer[index], data_frame->data.data, UART_BUFFER_SIZE);
+    // index += UART_BUFFER_SIZE;
 
     memcpy(&buffer[index], data_frame->data.checksum, sizeof(data_frame->data.checksum));
     index += sizeof(data_frame->data.checksum);
@@ -528,7 +484,7 @@ void serialize_data_frame(struct DataFrame *data_frame, char *buffer, int *buffe
 static int write_data_frame(int fd, struct DataFrame *data_frame)
 {
     flush_uart(fd);
-    char buffer[1033]; // Assuming a reasonable buffer size
+    char buffer[2057]; // Assuming a reasonable buffer size
     int buffer_size = 0;
     serialize_data_frame(data_frame, buffer, &buffer_size);
     printf("buffer size: %d\n", buffer_size);
@@ -622,15 +578,24 @@ void *serial_thread(void)
             }
             parse_command(buffer, num_bytes, &ack_frame);
             write_ack_frame(uart_out_fd, &ack_frame);
+            // restart application after save baudrate
+            if (need_restart)
+            {
+                need_restart = false;
+                restart_application();
+            }
         }
         flush_uart(uart_out_fd);
     }
     flush_uart(uart_out_fd);
     close(uart_out_fd);
+    printf("close serial port\n");
+    return NULL;
 }
 
 int start_serial_handler()
 {
+    printf("start serial thread\n");
     pthread_attr_t thread_attr;
     pthread_attr_init(&thread_attr);
     size_t stacksize;
@@ -638,78 +603,17 @@ int start_serial_handler()
     size_t new_stacksize = 320 * 1024;
     if (pthread_attr_setstacksize(&thread_attr, new_stacksize))
     {
-        printf("[region] Can't set stack size %zu\n", new_stacksize);
+        printf("[serial] Can't set stack size %zu\n", new_stacksize);
     }
     pthread_create(&serialPid, &thread_attr, (void *(*)(void *))serial_thread, NULL);
     if (pthread_attr_setstacksize(&thread_attr, stacksize))
     {
-        printf("[region] Error:  Can't set stack size %zu\n", stacksize);
+        printf("[serial] Error:  Can't set stack size %zu\n", stacksize);
     }
     pthread_attr_destroy(&thread_attr);
 }
 
-void stop_region_handler()
+void stop_serial_handler()
 {
-
     pthread_join(serialPid, NULL);
-}
-
-void handle_error(int signo)
-{
-    write(STDERR_FILENO, "Error occurred! Quitting...\n", 28);
-    keep_running = 0;
-    exit(EXIT_FAILURE);
-}
-
-void handle_exit(int signo)
-{
-    write(STDERR_FILENO, "Graceful shutdown...\n", 21);
-    keep_running = 0;
-    grace_ful = 1;
-}
-
-int main(int argc, char *argv[])
-{
-    printf("running main\n");
-    upgrade_application_from_sdcard();
-    {
-        char signal_error[] = {SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV};
-        char signal_exit[] = {SIGINT, SIGQUIT, SIGTERM};
-        char signal_null[] = {EPIPE, SIGPIPE};
-
-        for (char *s = signal_error; s < (&signal_error)[1]; s++)
-            signal(*s, handle_error);
-        for (char *s = signal_exit; s < (&signal_exit)[1]; s++)
-            signal(*s, handle_exit);
-        for (char *s = signal_null; s < (&signal_null)[1]; s++)
-            signal(*s, NULL);
-    }
-
-    if (parse_app_config() != CONFIG_OK)
-    {
-        fprintf(stderr, "Can't load app config 'serial.yaml'\n");
-        return EXIT_FAILURE;
-    }
-    printf("app config port: %s baudrate: %d package_size: %d\n", app_config.port, app_config.baudrate,
-           app_config.package_size);
-
-    toggleLed();
-
-    start_serial_handler();
-
-    while (keep_running)
-    {
-        watchdog_reset();
-        sleep(1);
-    }
-
-    stop_region_handler();
-
-    if (app_config.watchdog)
-        watchdog_stop();
-
-    if (!grace_ful)
-        restore_app_config();
-
-    return grace_ful ? EXIT_SUCCESS : EXIT_FAILURE;
 }

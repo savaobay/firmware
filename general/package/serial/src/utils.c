@@ -1,12 +1,96 @@
 // Function to URL-encode a string
 #include "utils.h"
+#include "region.h"
 #include <curl/curl.h>
 #include <dirent.h>
 #include <limits.h>
+#include <mbedtls/sha256.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mount.h>
 #include <sys/stat.h>
+#include <unistd.h>
+
+static inline void sha256_file(const char *filename, unsigned char *hash);
+static inline int copy_upgrade_file(const char *src, const char *dst);
+static inline int mount_sdcard(void);
+static inline int validate_upgrade_file(const char *file_path);
+
+static inline int mount_sdcard(void)
+{
+    // check if sd card is mounted
+    struct stat st;
+    if (stat(SD_CARD_PATH, &st) == 0)
+    {
+        fprintf(stderr, "SD card is already mounted\n");
+        return 0;
+    }
+    if (mount("/dev/mmcblk0p1", SD_CARD_PATH, "vfat", 0, NULL) != 0)
+    {
+        perror("Failed to mount SD card");
+        return -1;
+    }
+    return 0;
+}
+// Function to calculate the SHA-256 hash of a file
+static inline void sha256_file(const char *filename, unsigned char *hash)
+{
+    FILE *file = fopen(filename, "rb");
+    if (!file)
+    {
+        perror("File opening failed");
+        return;
+    }
+
+    mbedtls_sha256_context sha256_ctx;
+    mbedtls_sha256_init(&sha256_ctx);
+    mbedtls_sha256_starts_ret(&sha256_ctx, 0); // 0 means not in "SHA-224" mode (using SHA-256 mode)
+
+    unsigned char buffer[BUF_SIZE];
+    size_t bytesRead = 0;
+
+    while ((bytesRead = fread(buffer, 1, BUF_SIZE, file)) > 0)
+    {
+        mbedtls_sha256_update_ret(&sha256_ctx, buffer, bytesRead);
+    }
+
+    mbedtls_sha256_finish_ret(&sha256_ctx, hash);
+
+    fclose(file);
+    mbedtls_sha256_free(&sha256_ctx);
+}
+
+static inline int copy_upgrade_file(const char *src, const char *dst)
+{
+    int result = system("mv /mnt/mmcblk0p1/serial /usr/bin/serial");
+    if (result != 0)
+    {
+        perror("Failed to copy upgrade file");
+        return -1;
+    }
+}
+
+static inline int validate_upgrade_file(const char *file_path)
+{
+    struct stat st;
+    if (stat(file_path, &st) != 0 || st.st_size == 0)
+    {
+        fprintf(stderr, "Invalid upgrade file\n");
+        return -1;
+    }
+    unsigned char old[32]; // 32 bytes for SHA-256
+    unsigned char new[32]; // 32 bytes for SHA-256
+
+    sha256_file(APP_PATH, old);
+    sha256_file(UPGRADE_FILE_PATH, new);
+    if (memcmp(old, new, 32) == 0)
+    {
+        fprintf(stderr, "Upgrade file is the same as the current application\n");
+        return -1;
+    }
+    return 0;
+}
 
 char *textEncode(const char *str)
 {
@@ -149,7 +233,7 @@ long int findSize(char file_name[])
     return res;
 }
 
-char *readBytesFromFile(const char *filename, long start_index)
+char *readBytesFromFile(const char *filename, int max_size, long start_index)
 {
     FILE *fp;
     long file_size;
@@ -178,7 +262,7 @@ char *readBytesFromFile(const char *filename, long start_index)
     // if (start_index + UART_BUFFER_SIZE > file_size)
 
     // Allocate buffer for reading bytes
-    buffer = (char *)calloc(1, UART_BUFFER_SIZE * sizeof(char));
+    buffer = (char *)calloc(1, max_size * sizeof(char));
     if (buffer == NULL)
     {
         perror("Memory allocation failed");
@@ -190,11 +274,11 @@ char *readBytesFromFile(const char *filename, long start_index)
     fseek(fp, start_index, SEEK_SET);
 
     // Read num_bytes bytes into buffer
-    size_t bytesRead = fread(buffer, 1, UART_BUFFER_SIZE, fp);
+    size_t bytesRead = fread(buffer, 1, max_size, fp);
 
     // Output the read bytes (example: print as hexadecimal)
-    printf("Read %d bytes starting from index %ld:\n", UART_BUFFER_SIZE, start_index);
-    for (long i = 0; i < UART_BUFFER_SIZE; i++)
+    printf("Read %d bytes starting from index %ld:\n", max_size, start_index);
+    for (long i = 0; i < max_size; i++)
     {
         printf("%02X ", (unsigned char)buffer[i]);
     }
@@ -270,7 +354,7 @@ int listFile(struct tm *tm_info)
     }
     return count;
 }
-void toggleLed()
+void toggleLed(void)
 {
     int result = system("gpio toggle 0");
 
@@ -279,4 +363,32 @@ void toggleLed()
         // system() returned an error
         printf("Failed to execute command.\n");
     }
+}
+
+void restart_application(void)
+{
+    graceful = 1;
+    printf("Restarting application\n");
+    execl(APP_PATH, APP_PATH, (char *)NULL);
+    perror("Failed to restart application");
+}
+
+void upgrade_application_from_sdcard(void)
+{
+    if (mount_sdcard() != 0)
+    {
+        return;
+    }
+
+    if (validate_upgrade_file(UPGRADE_FILE_PATH) != 0)
+    {
+        return;
+    }
+
+    if (copy_upgrade_file(UPGRADE_FILE_PATH, APP_PATH) != 0)
+    {
+        return;
+    }
+
+    restart_application();
 }

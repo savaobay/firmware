@@ -1,0 +1,3 @@
+config BR2_PACKAGE_LIBMP4V2_OPENIPC
+	bool "libmp4v2-openipc"
+    depends on BR2_PACKAGE_ZLIB
