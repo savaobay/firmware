@@ -265,9 +265,10 @@ void parse_command(const char *buffer, size_t buffer_length, struct AckFrame *ac
             data.size = SIZE_1024;
         }
 
-        // checksum = header + cmd + camera_id + index + data_size + data and get the last 2 bytes
-        long checksum = data_frame.header + data_frame.command + data_frame.camera_id + package_no + data.size;
-        for (int i = 0; i < UART_BUFFER_SIZE; i++)
+        // checksum = header + cmd + camera_id + (hour+minute+package_no) + data_size + data and get the last 2 bytes
+        long checksum =
+            data_frame.header + data_frame.command + data_frame.camera_id + hour + minute + package_no + data.size;
+        for (int i = 0; i < app_config.package_size; i++)
         {
             checksum += data.data[i];
         }
