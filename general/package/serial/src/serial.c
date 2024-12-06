@@ -96,7 +96,7 @@ void flush_uart(int fd)
 
 // Function to parse data from UART buffer into Command structure
 
-void parse_command(const char *buffer, size_t buffer_length, struct AckFrame *ack_frame)
+void parse_command(char *buffer, size_t buffer_length, struct AckFrame *ack_frame)
 {
     if (buffer_length < 6)
     {
@@ -380,8 +380,15 @@ void parse_command(const char *buffer, size_t buffer_length, struct AckFrame *ac
         }
         else
         {
-            perror("Failed to set system time");
+            printf("Failed to set system time.\n");
         }
+        break;
+    case STATUS:
+        printf("Status command\n");
+        ack_frame->len = ACK_5;
+        ack_frame->command_specifier = STATUS;
+        // check sdcard status
+        ack_frame->optional = mount_sdcard();
         break;
 
     default:

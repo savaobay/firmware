@@ -38,6 +38,7 @@ enum CommandSpecifier
     SEND_SPEC_DATA_PACKAGE = 0x46,
     BAUD_RATE = 0x49,
     MOSD = 0x4F,
+    STATUS = 0x53,
     RTC = 0x54,
     NONE = 0x63
 };

@@ -22,3 +22,4 @@ int listFile(struct tm *tm_info);
 void toggleLed(void);
 void restart_application(void);
 void upgrade_application_from_sdcard(void);
+int mount_sdcard(void);

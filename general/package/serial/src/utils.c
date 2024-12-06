@@ -14,10 +14,9 @@
 
 static inline void sha256_file(const char *filename, unsigned char *hash);
 static inline int copy_upgrade_file(const char *src, const char *dst);
-static inline int mount_sdcard(void);
 static inline int validate_upgrade_file(const char *file_path);
 
-static inline int mount_sdcard(void)
+int mount_sdcard(void)
 {
     // check if sd card is mounted
     struct stat st;
