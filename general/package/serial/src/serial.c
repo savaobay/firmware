@@ -268,6 +268,12 @@ void parse_command(char *buffer, size_t buffer_length, struct AckFrame *ack_fram
         // checksum = header + cmd + camera_id + (hour+minute+package_no) + data_size + data and get the last 2 bytes
         long checksum =
             data_frame.header + data_frame.command + data_frame.camera_id + hour + minute + package_no + data.size;
+
+        printf("value of checksum: %d %d %d %d %d %d %d\n", data_frame.header, data_frame.command, data_frame.camera_id,
+               hour, minute, package_no, data.size);
+
+        printf("value of checksum as hex: %02X %02X %02X %02X %02X %02X %02X\n", data_frame.header, data_frame.command,
+               data_frame.camera_id, hour, minute, package_no, data.size);
         for (int i = 0; i < app_config.package_size; i++)
         {
             checksum += data.data[i];
