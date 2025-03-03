@@ -391,23 +391,22 @@ void *region_thread()
                     }
                 }
             }
-            else if (empty(osds[id].text) && osds[id].updt)
+            else
             {
-                char img[32];
-                sprintf(img, "/tmp/osd%d.bmp", id);
-                if (!access(img, F_OK))
+                char s[DATA_SIZE];
+                time_t t = time(NULL);
+                struct tm *tm = localtime(&t);
+                strftime(s, sizeof(s), timefmt, tm);
+                char *font;
+                asprintf(&font, "/usr/share/fonts/truetype/%s.ttf", osds[id].font);
+                if (!access(font, F_OK))
                 {
-                    BITMAP bitmap;
-                    if (!(prepare_bitmap(img, &bitmap, 0, 0, PIXEL_FORMAT_1555)))
-                    {
-                        create_region(&osds[id].hand, osds[id].posx, osds[id].posy, bitmap.u32Width, bitmap.u32Height);
-                        set_bitmap(osds[id].hand, &bitmap);
-                        free(bitmap.pData);
-                    }
+                    RECT rect = measure_text(font, osds[id].size, s);
+                    create_region(&osds[id].hand, osds[id].posx, osds[id].posy, rect.width, rect.height);
+                    BITMAP bitmap = raster_text(font, osds[id].size, s);
+                    set_bitmap(osds[id].hand, &bitmap);
+                    free(bitmap.pData);
                 }
-                else
-                    unload_region(&osds[id].hand);
-                osds[id].updt = 0;
             }
         }
         sleep(1);

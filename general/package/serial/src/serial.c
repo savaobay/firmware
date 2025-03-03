@@ -347,7 +347,6 @@ void parse_command(char *buffer, size_t buffer_length, struct AckFrame *ack_fram
         printf("OSD position: %c\n", osd.position);
         printf("OSD text length: %d\n", osd.text_length);
         printf("OSD text: %s\n", osd.text);
-        // sendGetRequest(osd.text);
         // set osd text and update
         char s[DATA_SIZE];
         time_t t = time(NULL);
@@ -382,6 +381,8 @@ void parse_command(char *buffer, size_t buffer_length, struct AckFrame *ack_fram
         // Set the system time
         if (settimeofday(&tv, NULL) == 0)
         {
+            // sync to rtc
+            system("hwclock -w -u");
             printf("System time updated successfully.\n");
         }
         else
