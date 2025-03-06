@@ -367,46 +367,20 @@ void *region_thread()
     {
         for (int id = 0; id < MAX_OSD; id++)
         {
-            if (!empty(osds[id].text))
+            char out[DATA_SIZE];
+            time_t t = time(NULL);
+            struct tm *tm = localtime(&t);
+            strftime(out, sizeof(out), timefmt, tm);
+            strcat(out, osds[id].text);
+            char *font;
+            asprintf(&font, "/usr/share/fonts/truetype/%s.ttf", osds[id].font);
+            if (!access(font, F_OK))
             {
-                char out[DATA_SIZE];
-                strcpy(out, osds[id].text);
-                if (strstr(out, "$"))
-                {
-                    fill(out);
-                    osds[id].updt = 1;
-                }
-
-                if (osds[id].updt)
-                {
-                    char *font;
-                    asprintf(&font, "/usr/share/fonts/truetype/%s.ttf", osds[id].font);
-                    if (!access(font, F_OK))
-                    {
-                        RECT rect = measure_text(font, osds[id].size, out);
-                        create_region(&osds[id].hand, osds[id].posx, osds[id].posy, rect.width, rect.height);
-                        BITMAP bitmap = raster_text(font, osds[id].size, out);
-                        set_bitmap(osds[id].hand, &bitmap);
-                        free(bitmap.pData);
-                    }
-                }
-            }
-            else
-            {
-                char s[DATA_SIZE];
-                time_t t = time(NULL);
-                struct tm *tm = localtime(&t);
-                strftime(s, sizeof(s), timefmt, tm);
-                char *font;
-                asprintf(&font, "/usr/share/fonts/truetype/%s.ttf", osds[id].font);
-                if (!access(font, F_OK))
-                {
-                    RECT rect = measure_text(font, osds[id].size, s);
-                    create_region(&osds[id].hand, osds[id].posx, osds[id].posy, rect.width, rect.height);
-                    BITMAP bitmap = raster_text(font, osds[id].size, s);
-                    set_bitmap(osds[id].hand, &bitmap);
-                    free(bitmap.pData);
-                }
+                RECT rect = measure_text(font, osds[id].size, out);
+                create_region(&osds[id].hand, osds[id].posx, osds[id].posy, rect.width, rect.height);
+                BITMAP bitmap = raster_text(font, osds[id].size, out);
+                set_bitmap(osds[id].hand, &bitmap);
+                free(bitmap.pData);
             }
         }
         sleep(1);

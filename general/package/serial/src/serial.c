@@ -349,13 +349,7 @@ void parse_command(char *buffer, size_t buffer_length, struct AckFrame *ack_fram
         printf("OSD text: %s\n", osd.text);
         // set osd text and update
         char s[DATA_SIZE];
-        time_t t = time(NULL);
-        struct tm *tm = localtime(&t);
-        strftime(s, sizeof(s), timefmt, tm);
-        strcat(s, osd.text);
-        strcpy(osds[0].text, s);
-        osds[0].updt = 1;
-
+        strcpy(osds[0].text, osd.text);
         free(osd.text);
         break;
 
