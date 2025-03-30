@@ -12,6 +12,8 @@ struct AppConfig
     char port[128];
     int baudrate;
     int package_size;
+		int threshold;
+		int sdcard_interval;
     unsigned int watchdog;
 };
 

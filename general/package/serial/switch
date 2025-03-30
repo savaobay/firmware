@@ -1,0 +1,73 @@
+WLAN_IF="wlan0"
+STA_CONF="/etc/sta"
+AP_CONF="/etc/ap"
+NET_CONF_DIR="/etc/network/interfaces.d"
+
+# Check if required commands exist
+for cmd in ifdown ifup fw_setenv fw_printenv; do
+    if ! command -v "$cmd" &>/dev/null; then
+        echo "Error: Command '$cmd' not found. Please install it." >&2
+        exit 1
+    fi
+done
+
+switch_to_sta() {
+    if [ -z "$2" ] || [ -z "$3" ]; then
+        echo "Error: Missing SSID or password for STA mode."
+        echo "Usage: $0 sta <SSID> <PASSWORD>"
+        exit 1
+    fi
+
+    local ssid="$2"
+    local pass="$3"
+
+    echo "Switching to STA mode..."
+    ifdown "$WLAN_IF"
+    fw_setenv wlanssid "$ssid"
+    fw_setenv wlanpass "$pass"
+
+    if [ ! -f "$STA_CONF" ]; then
+        echo "Error: STA configuration file '$STA_CONF' not found!" >&2
+        exit 1
+    fi
+
+    cp "$STA_CONF" "$NET_CONF_DIR/$WLAN_IF"
+    ifup "$WLAN_IF"
+    fw_setenv wlanmode sta
+}
+
+switch_to_ap() {
+    echo "Switching to AP mode..."
+    ifdown "$WLAN_IF"
+
+    if [ ! -f "$AP_CONF" ]; then
+        echo "Error: AP configuration file '$AP_CONF' not found!" >&2
+        exit 1
+    fi
+
+    cp "$AP_CONF" "$NET_CONF_DIR/$WLAN_IF"
+    ifup "$WLAN_IF"
+    fw_setenv wlanmode ap
+}
+
+restore_mode() {
+    local mode
+    mode=$(fw_printenv -n wlanmode 2>/dev/null || echo "sta") # Default to STA if not set
+
+    echo "Restoring $mode mode..."
+    ifdown "$WLAN_IF"
+
+    if [ "$mode" == "ap" ]; then
+        [ -f "$AP_CONF" ] && cp "$AP_CONF" "$NET_CONF_DIR/$WLAN_IF"
+    else
+        [ -f "$STA_CONF" ] && cp "$STA_CONF" "$NET_CONF_DIR/$WLAN_IF"
+    fi
+
+    ifup "$WLAN_IF"
+}
+
+case "$1" in
+    sta) switch_to_sta "$@" ;;
+    ap) switch_to_ap ;;
+    *) restore_mode ;;
+esac

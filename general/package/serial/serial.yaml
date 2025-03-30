@@ -2,4 +2,6 @@ serial:
   port: /dev/ttyS1
   baudrate: 115200
   package_size: 1024
+  threshold: 80
+  sdcard_interval: 10
   watchdog: 30

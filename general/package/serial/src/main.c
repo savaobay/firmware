@@ -3,6 +3,7 @@
 #include "data_define.h"
 #include "region.h"
 #include "serial.h"
+#include "storage.h"
 #include "text.h"
 #include "utils.h"
 #include "watchdog.h"
@@ -58,8 +59,9 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    printf("app config port: %s baudrate: %d package_size: %d watchdog: %d\n", app_config.port, app_config.baudrate,
-           app_config.package_size, app_config.watchdog);
+    printf("app config port: %s baudrate: %d package_size: %d threshold: %d sdcard_interval: %d watchdog: %d\n",
+           app_config.port, app_config.baudrate, app_config.package_size, app_config.threshold,
+           app_config.sdcard_interval, app_config.watchdog);
 
     int fd_mem = open("/dev/mem", O_RDWR);
     io_map = mmap(NULL, IO_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd_mem, IO_BASE);
@@ -70,6 +72,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "[%s:%d]RGN_Init failed with %#x!\n", __func__, __LINE__, s32Ret);
 
     toggleLed();
+    start_storage_handle();
     start_region_handler();
     start_serial_handler();
 
@@ -81,6 +84,7 @@ int main(int argc, char *argv[])
 
     stop_serial_handler();
     stop_region_handler();
+    stop_storage_handle();
 
     s32Ret = MI_RGN_DeInit();
     if (s32Ret)

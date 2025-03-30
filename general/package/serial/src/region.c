@@ -241,19 +241,23 @@ int set_bitmap(int handle, BITMAP *bitmap)
 
 void unload_region(int *handle)
 {
+    if (!handle || *handle < 0)
+    {
+        return;
+    }
+
     MI_RGN_ChnPort_t stChn;
+    stChn.eModId = E_MI_RGN_MODID_VPE;
     stChn.s32DevId = 0;
     stChn.s32ChnId = 0;
 
-    stChn.eModId = E_MI_RGN_MODID_VPE;
     stChn.s32OutputPortId = 1;
     MI_RGN_DetachFromChn(*handle, &stChn);
     stChn.s32OutputPortId = 0;
     MI_RGN_DetachFromChn(*handle, &stChn);
-    int s32Ret = MI_RGN_Destroy(*handle);
 
-    if (s32Ret)
-        fprintf(stderr, "[%s:%d]RGN_Destroy failed with %#x %d!\n", __func__, __LINE__, s32Ret, *handle);
+    MI_RGN_Destroy(*handle);
+    *handle = -1;
 }
 
 static void fill(char *str)
@@ -379,8 +383,15 @@ void *region_thread()
                 RECT rect = measure_text(font, osds[id].size, out);
                 create_region(&osds[id].hand, osds[id].posx, osds[id].posy, rect.width, rect.height);
                 BITMAP bitmap = raster_text(font, osds[id].size, out);
-                set_bitmap(osds[id].hand, &bitmap);
-                free(bitmap.pData);
+                if (bitmap.pData) {
+                    set_bitmap(osds[id].hand, &bitmap);
+                    free(bitmap.pData);
+                    bitmap.pData = NULL;
+                }
+                if (font) {
+                    free(font);
+                    font = NULL;
+                }
             }
         }
         sleep(1);

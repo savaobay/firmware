@@ -235,18 +235,20 @@ void parse_command(char *buffer, size_t buffer_length, struct AckFrame *ack_fram
         data_frame.command = cmd.command_specifier;
         data_frame.camera_id = cmd.camera_id;
 
-        struct Data data;
+        struct Data data = {0};
         data.id[0] = cmd.command_content[0];
         data.id[1] = cmd.command_content[1];
         data.id[2] = cmd.command_content[2]; // Index package
-        data.data = readBytesFromFile(path, app_config.package_size, (package_no - 1) * app_config.package_size);
+        char *buffer_data =
+            readBytesFromFile(path, app_config.package_size, (package_no - 1) * app_config.package_size);
         // memset(path, 0, PATH_MAX);
-        if (data.data == NULL)
+        if (buffer_data == NULL)
         {
             ack_frame->command_specifier = NONE;
-            free(data.data);
             break;
         }
+
+        data.data = buffer_data;
         switch (app_config.package_size)
         {
         case 256:
@@ -284,7 +286,7 @@ void parse_command(char *buffer, size_t buffer_length, struct AckFrame *ack_fram
         data_frame.end = END;
         // send package data
         write_data_frame(uart_out_fd, &data_frame);
-        free(data.data);
+        free(buffer_data);
         break;
 
     case BAUD_RATE:
@@ -341,9 +343,57 @@ void parse_command(char *buffer, size_t buffer_length, struct AckFrame *ack_fram
         struct OsdContent osd;
         osd.position = cmd.command_content[0];
         osd.text_length = cmd.command_content[1];
-        osd.text = malloc(osd.text_length + 1);
-        memcpy(osd.text, &cmd.command_content[2], osd.text_length);
-        osd.text[osd.text_length] = '\0';
+        char *osd_temp = malloc(osd.text_length + 1);
+        memcpy(osd_temp, cmd.command_content + 2, osd.text_length);
+        osd_temp[osd.text_length] = '\0';
+        printf("OSD text: %s\n", osd_temp);
+        printf("OSD text length: %d\n", osd.text_length);
+        // Parse datetime and text
+        struct tm date_variable = {0};
+        char *text_part;
+        char datetime_str[20] = {0};
+
+        // Find the separator
+        char *separator = strchr(osd_temp, '|');
+        if (separator)
+        {
+            // Split the string
+            size_t datetime_len = separator - osd_temp;
+            strncpy(datetime_str, osd_temp, datetime_len);
+            datetime_str[datetime_len] = '\0';
+            text_part = separator + 1;
+
+            // Parse datetime string
+            if (strptime(datetime_str, "%Y/%m/%d %H:%M:%S", &date_variable) == NULL)
+            {
+                printf("Failed to parse datetime: %s\n", datetime_str);
+            }
+
+            // Allocate and copy the actual text
+            osd.text = malloc(strlen(text_part) + 1);
+            strcpy(osd.text, text_part);
+
+            // Set RTC time if datetime parsing was successful
+            struct timeval tv;
+            tv.tv_sec = mktime(&date_variable);
+            tv.tv_usec = 0;
+            if (settimeofday(&tv, NULL) == 0)
+            {
+                // Sync to hardware RTC
+                system("hwclock -w -u");
+                printf("RTC time updated successfully\n");
+            }
+            else
+            {
+                printf("Failed to set RTC time\n");
+            }
+        }
+        else
+        {
+            // If no separator found, use the entire string as text
+            osd.text = malloc(strlen(osd_temp) + 1);
+            strcpy(osd.text, osd_temp);
+        }
         printf("OSD position: %c\n", osd.position);
         printf("OSD text length: %d\n", osd.text_length);
         printf("OSD text: %s\n", osd.text);
@@ -351,6 +401,7 @@ void parse_command(char *buffer, size_t buffer_length, struct AckFrame *ack_fram
         char s[DATA_SIZE];
         strcpy(osds[0].text, osd.text);
         free(osd.text);
+        free(osd_temp);
         break;
 
     case RTC:
@@ -390,6 +441,45 @@ void parse_command(char *buffer, size_t buffer_length, struct AckFrame *ack_fram
         ack_frame->command_specifier = STATUS;
         // check sdcard status
         ack_frame->optional = mount_sdcard();
+        break;
+
+    case NET:
+        printf("Network command\n");
+        ack_frame->len = ACK_4;
+        if (buffer_length < 11)
+        {
+            ack_frame->command_specifier = NONE;
+            return;
+        }
+        int mode = cmd.command_content[0];
+        int ssid_len = cmd.command_content[1];
+        int pass_len = cmd.command_content[2];
+        char *ssid = malloc(ssid_len + 1);
+        memcpy(ssid, &cmd.command_content[3], ssid_len);
+        ssid[ssid_len] = '\0';
+        char *pass = malloc(pass_len + 1);
+        memcpy(pass, &cmd.command_content[3 + ssid_len], pass_len);
+        pass[pass_len] = '\0';
+        printf("SSID: %s, PASS: %s\n", ssid, pass);
+        char command[100];
+        snprintf(command, sizeof(command), "switch sta %s %s", ssid, pass);
+        free(ssid);
+        free(pass);
+
+        switch (mode)
+        {
+        case 0x00:
+            system(command);
+            printf("switch to sta mode\n");
+            break;
+        case 0x01:
+            system("switch ap");
+            printf("switch to ap mode\n");
+            break;
+        default:
+            ack_frame->command_specifier = NONE;
+            return;
+        }
         break;
 
     default:

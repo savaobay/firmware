@@ -1,4 +1,4 @@
-SRCS := app_config.c config.c schrift.c bitmap.c region.c text.c compat.c tools.c utils.c watchdog.c serial.c main.c
+SRCS := app_config.c config.c storage.c schrift.c bitmap.c region.c text.c compat.c tools.c utils.c watchdog.c serial.c main.c
 BUILD = $(CC) $(SRCS) -I $(SDK)/include -L $(DRV) $(LIB) -Os -s -o $(or $(TARGET),$@)
 
 star6b0:

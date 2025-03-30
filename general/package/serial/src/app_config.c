@@ -53,6 +53,8 @@ int save_app_config(void)
     fprintf(file, "  port: %s\n", app_config.port);
     fprintf(file, "  baudrate: %d\n", app_config.baudrate);
     fprintf(file, "  package_size: %d\n", app_config.package_size);
+		fprintf(file, "  threshold: %d\n", app_config.threshold);
+		fprintf(file, "  sdcard_interval: %d\n", app_config.sdcard_interval);
     fprintf(file, "  watchdog: %d\n", app_config.watchdog);
 
     fclose(file);
@@ -66,6 +68,8 @@ enum ConfigError parse_app_config(void)
     app_config.port[0] = 0;
     app_config.baudrate = 115200;
     app_config.package_size = 1024;
+		app_config.threshold = 80;
+		app_config.sdcard_interval = 10;
     app_config.watchdog = 0;
 
     struct IniConfig ini;
@@ -88,6 +92,12 @@ enum ConfigError parse_app_config(void)
     if (err != CONFIG_OK)
         goto RET_ERR;
     err = parse_int(&ini, "serial", "package_size", 512, 2048, &app_config.package_size);
+    if (err != CONFIG_OK)
+        goto RET_ERR;
+		err = parse_int(&ini, "serial", "threshold", 0, 100, &app_config.threshold);
+    if (err != CONFIG_OK)
+        goto RET_ERR;
+		err = parse_int(&ini, "serial", "sdcard_interval", 0, 600, &app_config.sdcard_interval);
     if (err != CONFIG_OK)
         goto RET_ERR;
     err = parse_int(&ini, "serial", "watchdog", 0, INT_MAX, &app_config.watchdog);

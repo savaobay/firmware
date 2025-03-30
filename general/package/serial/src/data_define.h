@@ -40,6 +40,7 @@ enum CommandSpecifier
     MOSD = 0x4F,
     STATUS = 0x53,
     RTC = 0x54,
+		NET = 0x57,
     NONE = 0x63
 };
 
