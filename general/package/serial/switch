@@ -23,6 +23,7 @@ switch_to_sta() {
 
     echo "Switching to STA mode..."
     ifdown "$WLAN_IF"
+		sleep 1
     fw_setenv wlanssid "$ssid"
     fw_setenv wlanpass "$pass"
 
@@ -37,8 +38,16 @@ switch_to_sta() {
 }
 
 switch_to_ap() {
+		if [ -z "$2" ]; then
+        echo "Error: Missing SSID for AP mode."
+        echo "Usage: $0 ap <SSID>"
+        exit 1
+    fi
+
+    local ss="$2"
     echo "Switching to AP mode..."
     ifdown "$WLAN_IF"
+		sleep 1
 
     if [ ! -f "$AP_CONF" ]; then
         echo "Error: AP configuration file '$AP_CONF' not found!" >&2
@@ -46,7 +55,9 @@ switch_to_ap() {
     fi
 
     cp "$AP_CONF" "$NET_CONF_DIR/$WLAN_IF"
+		sed -i "s/^ssid=.*/ssid=$ss/" /etc/hostapd.conf
     ifup "$WLAN_IF"
+		fw_setenv wlanap "$ss"
     fw_setenv wlanmode ap
 }
 
@@ -56,6 +67,7 @@ restore_mode() {
 
     echo "Restoring $mode mode..."
     ifdown "$WLAN_IF"
+		sleep 1
 
     if [ "$mode" == "ap" ]; then
         [ -f "$AP_CONF" ] && cp "$AP_CONF" "$NET_CONF_DIR/$WLAN_IF"
@@ -68,6 +80,6 @@ restore_mode() {
 
 case "$1" in
     sta) switch_to_sta "$@" ;;
-    ap) switch_to_ap ;;
+    ap) switch_to_ap "$@" ;;
     *) restore_mode ;;
 esac
