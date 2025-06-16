@@ -122,6 +122,8 @@ jobs:
           - nt98566_lite
 
           # Rockchip
+          - rv1103_lite
+          - rv1106_lite
           - rv1109_lite
           - rv1126_lite
 
